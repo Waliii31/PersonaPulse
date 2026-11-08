@@ -1,0 +1,17 @@
+{
+  "name": "personapulse",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PersonaPulse — Autonomous Multi-Agent User Testing & UI Remediation SaaS",
+  "scripts": {
+    "dev:client": "npm run dev --prefix client",
+    "dev:server": "npm run dev --prefix server",
+    "dev:ai": "powershell -Command \"Set-Location ai-engine; .\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload\"",
+    "build:client": "npm run build --prefix client",
+    "build:server": "npm run build --prefix server",
+    "seed": "npm run seed --prefix server",
+    "test:server": "npm test --prefix server",
+    "test:ai": "powershell -Command \"Set-Location ai-engine; .\\.venv\\Scripts\\python.exe -m unittest tests/test_api.py -v\"",
+    "test": "npm run test:server && npm run test:ai"
+  }
+}
