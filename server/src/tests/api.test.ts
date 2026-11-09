@@ -87,6 +87,15 @@ async function runTests() {
   // ── 2. Endpoint Integration Tests ─────────────────────────────────────────
   console.log('\n📦 2. API Gateway Integration Tests:');
 
+  await test('GET / returns 200 OK with root service info & endpoint directory', async () => {
+    const res = await fetch(`${BASE_URL}/`);
+    assert.equal(res.status, 200);
+    const data: any = await res.json();
+    assert.equal(data.status, 'online');
+    assert.equal(data.name, 'PersonaPulse API Gateway');
+    assert.ok(data.endpoints, 'Should list active endpoints');
+  });
+
   await test('GET /api/health returns 200 OK with service info', async () => {
     const res = await fetch(`${BASE_URL}/api/health`);
     assert.equal(res.status, 200);
@@ -102,6 +111,14 @@ async function runTests() {
     assert.equal(data.success, true);
     assert.ok(Array.isArray(data.data));
     assert.ok(data.data.length >= 3, 'Expected at least 3 sandbox audits (Stripe, Notion, Shopify)');
+  });
+
+  await test('GET /api/seed returns 200 OK and confirms seeded reports', async () => {
+    const res = await fetch(`${BASE_URL}/api/seed`);
+    assert.equal(res.status, 200);
+    const data: any = await res.json();
+    assert.equal(data.success, true);
+    assert.ok(data.count >= 3);
   });
 
   await test('GET /api/audits/stripe-checkout-v4 returns full audit report', async () => {

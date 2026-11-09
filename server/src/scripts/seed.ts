@@ -682,17 +682,24 @@ export const SANDBOX_REPORTS = [
   },
 ];
 
-export async function seedSandboxDatabase(): Promise<void> {
-  const count = await AuditReport.countDocuments({ isSandbox: true });
-  if (count > 0) {
-    console.log(`ℹ️  Found ${count} existing sandbox audit report(s).`);
-    return;
+export async function seedSandboxDatabase(force = false): Promise<{ count: number; inserted: number; message: string }> {
+  if (force) {
+    const deleted = await AuditReport.deleteMany({ isSandbox: true });
+    console.log(`🧹 Force seed: Deleted ${deleted.deletedCount} existing sandbox reports.`);
   }
+
+  const count = await AuditReport.countDocuments({ isSandbox: true });
+  if (count > 0 && !force) {
+    console.log(`ℹ️  Found ${count} existing sandbox audit report(s).`);
+    return { count, inserted: 0, message: `Database already seeded with ${count} sandbox reports.` };
+  }
+
   const inserted = await AuditReport.insertMany(SANDBOX_REPORTS);
   console.log(`✅ Auto-seeded ${inserted.length} sandbox audit reports:`);
   inserted.forEach((r) =>
     console.log(`  [${r.scores.overallGrade}] ${r.url}  ->  /api/audits/${r.slug}`)
   );
+  return { count: inserted.length, inserted: inserted.length, message: `Successfully seeded ${inserted.length} sandbox reports.` };
 }
 
 async function seed(): Promise<void> {
