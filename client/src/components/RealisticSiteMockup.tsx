@@ -1,9 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Image from 'next/image';
+import { Loader2 } from 'lucide-react';
 import { AuditReport, Remediation } from '@/lib/types';
-import { CrosshairMarker } from './CrosshairMarker';
 
 interface RealisticSiteMockupProps {
   audit: AuditReport;
@@ -23,25 +23,49 @@ export function RealisticSiteMockup({
   const urlLower = (audit.url || '').toLowerCase();
   const slugLower = (audit.slug || '').toLowerCase();
 
-  // 1. Dynamic screenshot resolution:
-  // - If live scan captured a Base64 screenshot, use it immediately!
-  // - If pre-loaded sandbox audit, map to verified static assets.
-  // - If unknown URL with no screenshot, DO NOT default to Stripe; return null to show real layout skeleton.
-  let screenshotSrc: string | null = null;
-  let isBase64 = false;
+  // Build ordered list of real screenshot candidate URLs
+  const candidateScreenshots = useMemo(() => {
+    const list: string[] = [];
 
-  if (audit.domSnapshot?.screenshotBase64 && audit.domSnapshot.screenshotBase64.startsWith('data:image/')) {
-    screenshotSrc = audit.domSnapshot.screenshotBase64;
-    isBase64 = true;
-  } else if (urlLower.includes('stripe') || slugLower.includes('stripe')) {
-    screenshotSrc = '/images/sites/stripe.png';
-  } else if (urlLower.includes('notion') || slugLower.includes('notion')) {
-    screenshotSrc = '/images/sites/notion.png';
-  } else if (urlLower.includes('linear') || slugLower.includes('linear')) {
-    screenshotSrc = '/images/sites/linear.png';
-  } else if (urlLower.includes('shopify') || slugLower.includes('shopify')) {
-    screenshotSrc = '/images/sites/shopify.png';
-  }
+    // 1. Live Base64 screenshot from AI Engine / Playwright
+    if (audit.domSnapshot?.screenshotBase64 && audit.domSnapshot.screenshotBase64.startsWith('data:image/')) {
+      list.push(audit.domSnapshot.screenshotBase64);
+    }
+
+    // 2. Verified high-res assets for pre-loaded sandbox targets
+    if (urlLower.includes('stripe') || slugLower.includes('stripe')) {
+      list.push('/images/sites/stripe.png');
+    }
+    if (urlLower.includes('notion') || slugLower.includes('notion')) {
+      list.push('/images/sites/notion.png');
+    }
+    if (urlLower.includes('linear') || slugLower.includes('linear')) {
+      list.push('/images/sites/linear.png');
+    }
+    if (urlLower.includes('shopify') || slugLower.includes('shopify')) {
+      list.push('/images/sites/shopify.png');
+    }
+
+    // 3. Real live website screenshot providers for ANY scanned target (e.g., github.com)
+    if (audit.url && audit.url.startsWith('http')) {
+      list.push(`https://image.thum.io/get/width/1280/crop/800/noanimate/${audit.url}`);
+      list.push(`https://api.microlink.io/?url=${encodeURIComponent(audit.url)}&screenshot=true&meta=false&embed=screenshot.url`);
+      list.push(`https://s0.wp.com/mshots/v1/${encodeURIComponent(audit.url)}?w=1280&h=800`);
+    }
+
+    return list;
+  }, [audit, urlLower, slugLower]);
+
+  const [providerIndex, setProviderIndex] = useState(0);
+  const [imageLoaded, setImageLoaded] = useState(false);
+
+  // Reset provider index whenever target audit changes
+  useEffect(() => {
+    setProviderIndex(0);
+    setImageLoaded(false);
+  }, [audit.url, audit.slug]);
+
+  const currentScreenshotSrc = candidateScreenshots[providerIndex] || null;
 
   // Heatmap points collected from all traces
   const heatmapPoints = (audit.personaTraces || []).flatMap((trace) =>
@@ -83,81 +107,45 @@ export function RealisticSiteMockup({
         </div>
       )}
 
-      {/* Real Screenshot OR Simulated Target Website Layout */}
-      <div className={`relative w-full ${viewportMode === 'mobile' ? 'max-w-sm mx-auto shadow-2xl border-x border-[#E6E4DD] dark:border-[#1F1F1F]' : 'w-full'} flex-1 overflow-hidden`}>
-        <div className="relative w-full aspect-[16/10] min-h-[500px]">
-          {screenshotSrc ? (
-            isBase64 ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={screenshotSrc}
-                alt={audit.domSnapshot?.title || audit.url || 'Live Scanned Website'}
-                className={`w-full h-full object-cover object-top transition-transform duration-300 ${
-                  isFixed ? 'filter saturate-105' : ''
-                }`}
-              />
-            ) : (
-              <Image
-                src={screenshotSrc}
-                alt={audit.domSnapshot?.title || audit.url || 'Audited Website'}
-                fill
-                className={`object-cover object-top transition-transform duration-300 ${
-                  isFixed ? 'filter saturate-105' : ''
-                }`}
-                priority
-                sizes="(max-width: 1200px) 100vw, 1200px"
-              />
-            )
+      {/* Real Screenshot Container */}
+      <div
+        className={`relative w-full ${
+          viewportMode === 'mobile'
+            ? 'max-w-sm mx-auto shadow-2xl border-x border-[#E6E4DD] dark:border-[#1F1F1F]'
+            : 'w-full'
+        } flex-1 overflow-hidden`}
+      >
+        <div className="relative w-full aspect-[16/10] min-h-[500px] bg-[#FAF9F5] dark:bg-[#050505] flex items-center justify-center">
+          {/* Loading Indicator while the Real Screenshot loads */}
+          {!imageLoaded && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 z-10 text-[#78716C] bg-[#FAF9F5] dark:bg-[#080808]">
+              <Loader2 className="w-6 h-6 animate-spin text-[#E53E00]" />
+              <span className="text-xs font-mono">Rendering real viewport snapshot for {audit.url || 'target'}...</span>
+            </div>
+          )}
+
+          {currentScreenshotSrc ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              key={currentScreenshotSrc}
+              src={currentScreenshotSrc}
+              alt={audit.domSnapshot?.title || audit.url || 'Live Audited Website'}
+              className={`w-full h-full object-cover object-top transition-all duration-300 ${
+                imageLoaded ? 'opacity-100' : 'opacity-0'
+              } ${isFixed ? 'filter saturate-105' : ''}`}
+              onLoad={() => setImageLoaded(true)}
+              onError={() => {
+                // If current provider fails, try the next real screenshot provider
+                if (providerIndex < candidateScreenshots.length - 1) {
+                  setProviderIndex((prev) => prev + 1);
+                } else {
+                  setImageLoaded(true);
+                }
+              }}
+            />
           ) : (
-            /* Graceful Fallback: Realistic Site Wireframe / Skeleton matching the Scanned Target */
-            <div className="w-full h-full p-8 bg-[#FAF9F5] dark:bg-[#080808] border border-[#E6E4DD] dark:border-[#1F1F1F] flex flex-col justify-between">
-              <div>
-                {/* Simulated Navbar */}
-                <div className="flex items-center justify-between pb-6 border-b border-[#E6E4DD] dark:border-[#1F1F1F] mb-12">
-                  <div className="flex items-center gap-3">
-                    <div className="w-6 h-6 rounded bg-[#E53E00] flex items-center justify-center text-white text-xs font-bold">
-                      {audit.domSnapshot?.title?.charAt(0) || 'W'}
-                    </div>
-                    <span className="font-bold text-sm text-[#111111] dark:text-white truncate max-w-[200px]">
-                      {audit.domSnapshot?.title || audit.url}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs font-mono text-[#78716C]">
-                    <span>Features</span>
-                    <span>Pricing</span>
-                    <span>Docs</span>
-                    <span className="px-2.5 py-1 bg-[#111111] dark:bg-white text-white dark:text-[#111] font-semibold text-[11px] rounded-sm">
-                      Sign In
-                    </span>
-                  </div>
-                </div>
-
-                {/* Simulated Hero Section */}
-                <div className="max-w-xl mx-auto text-center space-y-4 pt-6">
-                  <div className="inline-block px-3 py-1 bg-[#E53E00]/10 border border-[#E53E00]/30 text-[#E53E00] text-xs font-mono font-semibold">
-                    LIVE TARGET AUDIT: {audit.url}
-                  </div>
-                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#111111] dark:text-white">
-                    {audit.domSnapshot?.title || 'Audited Web Architecture'}
-                  </h1>
-                  <p className="text-xs text-[#78716C] leading-relaxed">
-                    Interactive DOM inspection in progress. Multi-agent cursors traversing coordinates and accessibility tree.
-                  </p>
-                  <div className="pt-2 flex items-center justify-center gap-3">
-                    <button className="px-5 py-2.5 bg-[#E53E00] text-white text-xs font-semibold rounded-sm shadow-sm">
-                      Get Started Free
-                    </button>
-                    <button className="px-4 py-2.5 border border-[#D6D3CD] dark:border-[#262626] text-xs font-semibold text-[#111111] dark:text-white bg-white dark:bg-[#141414]">
-                      Explore Demo →
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-6 border-t border-[#E6E4DD] dark:border-[#1F1F1F] flex items-center justify-between text-[11px] font-mono text-[#78716C]">
-                <span>Host: {audit.url}</span>
-                <span>Playwright Viewport: 1280 × 800</span>
-              </div>
+            <div className="flex flex-col items-center justify-center p-8 text-center text-[#78716C]">
+              <span className="text-xs font-mono">Real screenshot pending for {audit.url}</span>
             </div>
           )}
 

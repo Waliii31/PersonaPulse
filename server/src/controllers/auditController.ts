@@ -56,6 +56,14 @@ export async function getAuditBySlug(
       return;
     }
 
+    // Ensure live audit has a real screenshot source if base64 is missing
+    if (!audit.isSandbox && (!audit.domSnapshot?.screenshotBase64 || !audit.domSnapshot.screenshotBase64.startsWith('data:image/')) && audit.url) {
+      if (!audit.domSnapshot) {
+        (audit as any).domSnapshot = { title: audit.url, viewport: { width: 1280, height: 800 }, interactiveElements: [] };
+      }
+      audit.domSnapshot.screenshotBase64 = `https://image.thum.io/get/width/1280/crop/800/noanimate/${audit.url}`;
+    }
+
     res.json({ success: true, data: audit });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Failed to fetch audit' });
@@ -127,6 +135,22 @@ export async function scanUrl(req: Request, res: Response): Promise<void> {
     }
 
     const aiData: any = await aiResponse.json();
+
+    // Ensure live audit has a real screenshot attached
+    if (!aiData.domSnapshot?.screenshotBase64 || !aiData.domSnapshot.screenshotBase64.startsWith('data:image/')) {
+      try {
+        const screenshotResp = await fetch(`https://image.thum.io/get/width/1280/crop/800/noanimate/${normalised}`);
+        if (screenshotResp.ok) {
+          const buffer = await screenshotResp.arrayBuffer();
+          if (buffer.byteLength > 3000) {
+            aiData.domSnapshot = aiData.domSnapshot || {};
+            aiData.domSnapshot.screenshotBase64 = `data:image/png;base64,${Buffer.from(buffer).toString('base64')}`;
+          }
+        }
+      } catch (err) {
+        console.warn('Real screenshot capture fallback failed:', err);
+      }
+    }
 
     // Ensure unique slug
     let finalSlug = aiData.slug || 'custom-audit';

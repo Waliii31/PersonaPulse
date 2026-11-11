@@ -1,6 +1,8 @@
 import json
 import re
 import asyncio
+import base64
+import urllib.parse
 from pathlib import Path
 from typing import Dict, List, Any
 import httpx
@@ -16,37 +18,67 @@ DEFAULT_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
+async def fetch_remote_screenshot(url: str) -> str:
+    """
+    High-availability remote screenshot fallback using fast headless rendering services.
+    Captures a real 1280x800 viewport screenshot and converts it to a Base64 data URI.
+    """
+    encoded_url = urllib.parse.quote(url, safe="")
+    providers = [
+        f"https://image.thum.io/get/width/1280/crop/800/noanimate/{url}",
+        f"https://api.microlink.io/?url={encoded_url}&screenshot=true&meta=false&embed=screenshot.url",
+        f"https://s0.wp.com/mshots/v1/{encoded_url}?w=1280&h=800",
+    ]
+
+    async with httpx.AsyncClient(timeout=14.0, follow_redirects=True, headers=DEFAULT_HEADERS) as client:
+        for provider_url in providers:
+            try:
+                resp = await client.get(provider_url)
+                if resp.status_code == 200 and len(resp.content) > 3000:
+                    content_type = resp.headers.get("content-type", "image/png").split(";")[0]
+                    if not content_type.startswith("image/"):
+                        content_type = "image/png"
+                    b64_str = base64.b64encode(resp.content).decode("utf-8")
+                    print(f"📸 Captured live remote screenshot for {url} via {provider_url[:35]}... ({len(b64_str)} chars)")
+                    return f"data:{content_type};base64,{b64_str}"
+            except Exception as e:
+                print(f"⚠️ Remote screenshot provider {provider_url[:35]} failed: {e}")
+                continue
+
+    return ""
+
 async def capture_screenshot_base64(url: str) -> str:
     """
-    Captures a real 1280x800 viewport screenshot using Playwright headless Chromium.
+    Captures a real 1280x800 viewport screenshot of the audited target website.
+    Tries local Playwright first, with automatic fallback to high-availability remote headless rendering.
     Returns 'data:image/png;base64,...'
     """
     helper_script = Path(__file__).parent.parent / "screenshot_helper.js"
-    if not helper_script.exists():
-        return ""
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "node", str(helper_script), url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+    if helper_script.exists():
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20.0)
-            if proc.returncode == 0:
-                output = stdout.decode("utf-8").strip()
-                if output.startswith("data:image/"):
-                    print(f"📸 Captured live Playwright screenshot for {url} ({len(output)} chars)")
-                    return output
-            else:
-                err_msg = stderr.decode("utf-8")
-                print(f"⚠️ Playwright screenshot warning: {err_msg[:200]}")
-        except asyncio.TimeoutError:
-            proc.kill()
-            print(f"⚠️ Playwright screenshot timed out for {url}")
-    except Exception as e:
-        print(f"⚠️ Playwright screenshot execution failed: {e}")
-    return ""
+            proc = await asyncio.create_subprocess_exec(
+                "node", str(helper_script), url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20.0)
+                if proc.returncode == 0:
+                    output = stdout.decode("utf-8").strip()
+                    if output.startswith("data:image/"):
+                        print(f"📸 Captured live Playwright screenshot for {url} ({len(output)} chars)")
+                        return output
+                else:
+                    err_msg = stderr.decode("utf-8")
+                    print(f"⚠️ Playwright screenshot warning: {err_msg[:200]}")
+            except asyncio.TimeoutError:
+                proc.kill()
+                print(f"⚠️ Playwright screenshot timed out for {url}")
+        except Exception as e:
+            print(f"⚠️ Playwright screenshot execution failed: {e}")
+
+    # Fallback to high-availability real screenshot rendering
+    return await fetch_remote_screenshot(url)
 
 async def fetch_and_extract_dom(url: str) -> CompactDomSummary:
     """
